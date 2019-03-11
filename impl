@@ -1,0 +1,212 @@
+package com.cg.mobilebilling.services;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+
+import com.cg.mobilebilling.beans.Bill;
+import com.cg.mobilebilling.beans.Customer;
+import com.cg.mobilebilling.beans.Plan;
+import com.cg.mobilebilling.beans.PostpaidAccount;
+import com.cg.mobilebilling.daoservices.BillingDAOServices;
+import com.cg.mobilebilling.daoservices.CustomerDAOServices;
+import com.cg.mobilebilling.daoservices.PlanDAOServices;
+import com.cg.mobilebilling.daoservices.PostpaidAccountDAOServices;
+import com.cg.mobilebilling.exceptions.BillDetailsNotFoundException;
+import com.cg.mobilebilling.exceptions.BillingServicesDownException;
+import com.cg.mobilebilling.exceptions.CustomerDetailsNotFoundException;
+import com.cg.mobilebilling.exceptions.InvalidBillMonthException;
+import com.cg.mobilebilling.exceptions.PlanDetailsNotFoundException;
+import com.cg.mobilebilling.exceptions.PostpaidAccountNotFoundException;
+
+public class BillingServicesImpl implements BillingServices {
+	@Autowired
+	private PlanDAOServices planDAOService;
+	@Autowired
+	private CustomerDAOServices customerDAOService;
+	@Autowired
+	private PostpaidAccountDAOServices postpaidAccountDAOService;
+	@Autowired
+	private BillingDAOServices billingDAOServices;
+	static int FLAG=0;
+	public BillingServicesImpl() {
+		super();
+	}
+	@Override
+	public List<Plan> getPlanAllDetails() throws BillingServicesDownException {
+		if(FLAG<1) {
+			Plan plan;
+			plan=new Plan(150, 100, 100, 100, 100, 1024, 0.1f, 0.1f, 1.0f, 1.0f, 1.0f, "PUNJAB", "HOLI BUMPER");
+			planDAOService.save(plan);
+			plan=new Plan(100, 75, 75, 75, 75, 1024, 0.1f, 0.1f, 1.0f, 1.0f, 1.0f, "PUNJAB", "CHOTA BONAZA");
+			planDAOService.save(plan);
+			plan=new Plan(500, 500, 500, 500, 500, 5128, 0.1f, 0.1f, 1.0f, 1.0f, 1.0f, "pUNJAB", "SUPER SAVINGS ");
+			planDAOService.save(plan);
+			FLAG++;
+
+		}
+		List<Plan> listPlan=planDAOService.findAll();
+		return listPlan;
+	}
+
+	@Override
+	public int acceptCustomerDetails(Customer customer) throws BillingServicesDownException {
+		customer=customerDAOService.save(customer);
+		return customer.getCustomerID();
+	}
+
+	@Override
+	public long openPostpaidMobileAccount(int customerID, int planID)
+			throws PlanDetailsNotFoundException, CustomerDetailsNotFoundException, BillingServicesDownException {
+
+		Customer customer=customerDAOService.findById(customerID).orElseThrow(()->new CustomerDetailsNotFoundException("Customer details not found"));
+
+		Plan plan=planDAOService.findById(planID).orElseThrow(()->new PlanDetailsNotFoundException("Enter valid plan"));
+
+		PostpaidAccount postpaidAccount=new PostpaidAccount(customer,plan);
+		postpaidAccount=postpaidAccountDAOService.save(postpaidAccount);
+		return postpaidAccount.getMobileNo();
+	}
+
+	@Override
+	public Bill generateMonthlyMobileBill(int customerID, long mobileNo, String billMonth, int noOfLocalSMS,
+			int noOfStdSMS, int noOfLocalCalls, int noOfStdCalls, int internetDataUsageUnits)
+					throws CustomerDetailsNotFoundException, PostpaidAccountNotFoundException, InvalidBillMonthException,
+					BillingServicesDownException, PlanDetailsNotFoundException {
+		PostpaidAccount postpaidAccount=postpaidAccountDAOService.findById( mobileNo).orElseThrow(()->new PlanDetailsNotFoundException("Postpaid Account not found")); 
+
+		Plan plan=postpaidAccount.getPlan();
+		Map<String, Bill> bills=postpaidAccount.getBills();
+
+		float  localSMSAmount=0;
+		if(noOfLocalSMS>plan.getFreeLocalSMS()) {
+			int extraSMS=noOfLocalSMS-plan.getFreeLocalSMS();
+			localSMSAmount=extraSMS*plan.getLocalSMSRate();}
+
+		float localCallAmount=0;
+		if(noOfLocalCalls>plan.getFreeLocalCalls()) {
+			int extraCalls=noOfLocalCalls-plan.getFreeLocalCalls();
+			localCallAmount=extraCalls*plan.getLocalCallRate();}
+
+		float stdCallAmount=0;
+		if(noOfStdCalls>plan.getFreeStdCalls()) {
+			int extraStdCalls=noOfStdCalls-plan.getFreeStdCalls();
+			localCallAmount=extraStdCalls*plan.getStdCallRate();}
+
+		float stdSMSAmount = 0;
+		if(noOfStdSMS>plan.getFreeStdSMS()) {
+			int extraStdSMS=noOfStdSMS-plan.getFreeStdSMS();
+			stdSMSAmount=extraStdSMS*plan.getStdSMSRate();}
+
+		float internetDataUsageAmount=0;
+		if(internetDataUsageUnits>plan.getFreeInternetDataUsageUnits()) {
+			int extraDataUsage=internetDataUsageUnits-plan.getFreeInternetDataUsageUnits();
+			internetDataUsageAmount=extraDataUsage*plan.getInternetDataUsageRate();}
+
+		int monthlyRental=0;
+		monthlyRental= plan.getMonthlyRental();
+		float billAmount=0;
+		billAmount=monthlyRental+localSMSAmount+stdSMSAmount+localCallAmount+stdCallAmount+internetDataUsageAmount;
+		float servicesTax=0;
+		servicesTax=(int)billAmount*10/100;
+		float vat=0;
+		vat=(int)billAmount*5/100;
+		float totalBillAmount=0;
+		totalBillAmount = billAmount+servicesTax+vat;
+
+		Bill bill=new Bill(noOfLocalSMS, noOfStdSMS, noOfLocalCalls, noOfStdCalls, internetDataUsageUnits, billMonth, totalBillAmount, localSMSAmount, stdSMSAmount, localCallAmount, stdCallAmount, internetDataUsageAmount, servicesTax, vat, postpaidAccount);
+		bill=billingDAOServices.save(bill);
+		return bill;
+	}
+	@Override
+	public Customer getCustomerDetails(int customerID)
+			throws CustomerDetailsNotFoundException, BillingServicesDownException {
+
+		return customerDAOService.findById(customerID).orElseThrow(()->new CustomerDetailsNotFoundException("Customer details  not found"));
+	}
+
+	@Override
+	public List<Customer> getAllCustomerDetails() throws BillingServicesDownException {
+
+		return customerDAOService.findAll();
+	}
+	@Override
+	public List<PostpaidAccount> getCustomerAllPostpaidAccountsDetails(int customerID)
+			throws CustomerDetailsNotFoundException, BillingServicesDownException {
+		Customer customer = customerDAOService.findById(customerID)
+				.orElseThrow(()->new CustomerDetailsNotFoundException("Customer Details not found"));
+
+		Map<Long,PostpaidAccount> customers= customer.getPostpaidAccounts();
+
+		List<PostpaidAccount> postpaidAccounts =new ArrayList<>(customers.values());
+		return postpaidAccounts;
+	}
+	//********************************************************************************************************************************
+
+	@Override
+	public Bill getMobileBillDetails(int customerID, long mobileNo, String billMonth)
+			throws CustomerDetailsNotFoundException, PostpaidAccountNotFoundException, InvalidBillMonthException,
+			BillDetailsNotFoundException, BillingServicesDownException, PlanDetailsNotFoundException {
+		if(billMonth=="Janurary" || billMonth=="Feburary" || billMonth=="March"  ||billMonth=="April" || billMonth=="May" || billMonth=="June"||
+				billMonth=="July" || billMonth=="August" || billMonth=="September" || billMonth=="October" ||billMonth=="November" || billMonth=="December") {
+//				Bill bill  = getCustomerDetails(customerID).getPostpaidAccounts().getValue(mobileNo).getBilll(billMonth);
+						Bill bill  = getCustomerDetails(customerID).getPostpaidAccounts().get(billMonth).getBills().get(billMonth);
+		return bill;
+	}
+	else {
+		throw new PlanDetailsNotFoundException();}	
+}
+@Override
+public List<Bill> getCustomerPostPaidAccountAllBillDetails(int customerID, long mobileNo)throws CustomerDetailsNotFoundException, PostpaidAccountNotFoundException, BillingServicesDownException,
+BillDetailsNotFoundException, PlanDetailsNotFoundException {
+	List<Bill> bills=billingDAOServices.getCustomerPostPaidAccountAllBills(mobileNo);
+	if(bills.isEmpty()==true)
+		throw new BillDetailsNotFoundException();
+	return bills;
+}
+/*@Override
+public int changePlan(int customerID, long mobileNo, int planID) throws CustomerDetailsNotFoundException,
+PostpaidAccountNotFoundException, PlanDetailsNotFoundException, BillingServicesDownException {
+
+	postpaidAccountDAOService.findById(mobileNo);
+	planDAOService.findById(planID);
+	return changePlan(planID, mobileNo);
+
+}*/
+
+@Override
+public Plan getCustomerPostPaidAccountPlanDetails(int customerID, long mobileNo)
+		throws CustomerDetailsNotFoundException, PostpaidAccountNotFoundException, BillingServicesDownException,
+		PlanDetailsNotFoundException {
+	customerDAOService.findById(customerID);
+	PostpaidAccount postpaidAccount=postpaidAccountDAOService.findById(mobileNo).orElseThrow(()->new PlanDetailsNotFoundException());	Plan plan=postpaidAccount.getPlan();
+	if(plan==null)
+		throw new PlanDetailsNotFoundException();
+	return plan;
+}
+@Override
+public boolean closeCustomerPostPaidAccount(int customerID, long mobileNo) throws CustomerDetailsNotFoundException,
+PostpaidAccountNotFoundException, BillingServicesDownException, PlanDetailsNotFoundException {
+	postpaidAccountDAOService.findById(mobileNo);
+	customerDAOService.findById(customerID);
+	//removal code
+	postpaidAccountDAOService.deleteById(mobileNo);
+	return true;
+}
+@Override
+public boolean deleteCustomer(int customerID)
+		throws BillingServicesDownException, CustomerDetailsNotFoundException {
+	customerDAOService.findById(customerID);
+	customerDAOService.deleteById(customerID);
+	return true;
+}
+@Override
+public int changePlan(int customerID, long mobileNo, int planID) throws CustomerDetailsNotFoundException,
+		PostpaidAccountNotFoundException, PlanDetailsNotFoundException, BillingServicesDownException {
+	// TODO Auto-generated method stub
+	return 0;
+}
+
+}
